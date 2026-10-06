@@ -13,7 +13,7 @@ The repo is edited on macOS; scripts run on Windows 10 2004+ / Windows 11. They 
 | `clean-windows.bat` | `%TEMP%`, `%WINDIR%\Temp` (items older than 1 h), Explorer Recent + Quick Access recent jump list, `cleanmgr /sagerun:42` (safe categories only), `DISM /StartComponentCleanup` | yes | low, no prompt | no |
 | `clean-usb-history.bat` | Disconnected USB flash drives (USBSTOR) + disconnected portable devices (WPD): PnP records, `MountedDevices`, `MountPoints2`, `Windows Portable Devices`, `EMDMgmt`, `VolumeInfoCache`, `setupapi.dev*.log` sections, 4 device-connection event logs | yes | high | option `1` = backup, `5` = no backup |
 | `clean-office-history.bat` | Word/Excel/PowerPoint MRU for every Office version and account: File/Place MRU, Recent Templates, TrustRecords, Word Reading Locations, `%APPDATA%\Microsoft\Office\Recent` | **no** (HKCU, must run as current user) | medium | option `1` = backup, `5` = no backup |
-| `clean-shell-history.bat` | Explorer activity: RunMRU (Win+R), TypedPaths, WordWheelQuery (search), RecentDocs, ShellBags (folder views, both `Software\Shell` and `Classes`), UserAssist launch counters | **no** (HKCU, must run as current user) | medium (resets folder views) | option `1` = backup, `5` = no backup |
+| `clean-shell-history.bat` | Explorer activity: RunMRU (Win+R), TypedPaths, WordWheelQuery (search), RecentDocs, ShellBags (folder views, both `Software\Shell` and `Classes`), UserAssist launch counters, Jump Lists (`AutomaticDestinations` + `CustomDestinations`: files deleted, pinned-in-menu items lost) | **no** (HKCU, must run as current user) | medium (resets folder views) | option `1` = backup, `5` = no backup |
 
 ## File format — hard rules
 
@@ -85,10 +85,12 @@ Fixed 2026-10-06:
 - `clean-usb-history.bat`: setupapi filter now also removes sections of disconnected WPD devices (phones/cameras), not just flash drives (`$wpdKeysId` folded into `Invoke-LogFilter` `$Extra`; preview count updated).
 - `clean-usb-history.bat`: added `VolumeInfoCache` (cached drive labels for disconnected letters).
 - Added `clean-shell-history.bat` (Explorer activity: RunMRU, TypedPaths, WordWheelQuery, RecentDocs, ShellBags, UserAssist).
+- `clean-shell-history.bat`: Jump Lists (all files in both folders, backed up under `JumpLists\`). Decision: delete whole files rather than filter entries, so pinned-in-menu items are lost; taskbar-pinned icons survive.
+- `clean-usb-history.bat`: preview lists drive letters + labels for VolumeInfoCache.
 
 Open:
 - `clean-office-history.bat`: `Recent Templates` root is treated as a value MRU — any non-whitelisted setting value there would be deleted. Verify on a real profile or drop that target.
-- Not covered yet (candidates): Office app jump lists in `AutomaticDestinations`, Office roaming MRU for signed-in accounts (list can come back from the cloud), Windows Search index (`Windows.edb`), thumbnail/icon caches beyond cleanmgr.
+- Not covered yet (candidates): Office roaming MRU for signed-in accounts (list can come back from the cloud), Windows Search index (`Windows.edb`), thumbnail/icon caches beyond cleanmgr.
 
 ## Testing
 
@@ -107,7 +109,7 @@ Full map of what Windows holds and what is/could be cleaned with built-in tools.
 | Drive labels | VolumeInfoCache | ✅ | usb |
 | Office MRU | File/Place MRU, TrustRecords, Reading Locations | ✅ | office |
 | Shell activity | RunMRU, TypedPaths, WordWheelQuery, RecentDocs, ShellBags, UserAssist | ✅ | shell |
-| Shell | Jump Lists (`AutomaticDestinations`/`CustomDestinations`) | ⬜ | — |
+| Shell | Jump Lists (`AutomaticDestinations`/`CustomDestinations`) | ✅ | shell |
 | Search | Windows Search index (`Windows.edb`) | ⬜ | — |
 | Caches | thumbnail/icon caches beyond cleanmgr | ⬜ | — |
 | Event logs | Shell-Core/Operational, TaskScheduler, RDP connections | ⬜ | — |

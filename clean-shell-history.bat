@@ -2,8 +2,9 @@
 :: ============================================================
 ::  clean-shell-history.bat - clears Explorer "activity" traces for privacy:
 ::  Run box (RunMRU), typed paths, Explorer search (WordWheelQuery), recent
-::  documents (RecentDocs), folder-view history (ShellBags) and the UserAssist
-::  program-launch counters. Built-in tools only. Per-user (HKCU).
+::  documents (RecentDocs), folder-view history (ShellBags), the UserAssist
+::  program-launch counters and the Jump Lists (taskbar icon menus: recent and
+::  pinned-in-menu items). Built-in tools only. Per-user (HKCU / %APPDATA%).
 ::  Explorer is restarted so cleared lists are not written back from memory.
 ::  Option 1 = clean + backup to %LOCALAPPDATA%\Shell-history-backup-<date>
 ::             (local, not synced to OneDrive/iCloud).
@@ -49,6 +50,8 @@ $BagMRU1    = 'Software\Microsoft\Windows\Shell\BagMRU'
 $Bags1      = 'Software\Microsoft\Windows\Shell\Bags'
 $BagMRU2    = 'Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU'
 $Bags2      = 'Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\Bags'
+$JumpAuto   = Join-Path $env:APPDATA 'Microsoft\Windows\Recent\AutomaticDestinations'
+$JumpCustom = Join-Path $env:APPDATA 'Microsoft\Windows\Recent\CustomDestinations'
 
 # --- Explorer stop/start (these lists are cached in memory and rewritten on exit) ---
 function Get-MyExplorer {
@@ -93,7 +96,14 @@ function Measure-UserAssist([string]$Path) {
     return $n
 }
 
+# Counts files in a folder (Jump Lists); -1 if the folder is absent.
+function Measure-Files([string]$Dir) {
+    if (-not (Test-Path -LiteralPath $Dir)) { return -1 }
+    return @(Get-ChildItem -LiteralPath $Dir -File -Force -ErrorAction SilentlyContinue).Count
+}
+
 function Measure-Target($T) {
+    if ($T.Type -eq 'files') { return Measure-Files $T.Path }
     if ($T.Type -eq 'userassist') { return Measure-UserAssist $T.Path }
     return Measure-Branch $T.Path
 }
@@ -126,7 +136,17 @@ function Clear-UserAssist([string]$Path) {
     return $ok
 }
 
+# Deletes every file in a folder (Jump Lists), keeps the folder itself.
+function Clear-Files([string]$Dir) {
+    $ok = $true
+    foreach ($f in @(Get-ChildItem -LiteralPath $Dir -File -Force -ErrorAction SilentlyContinue)) {
+        try { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop } catch { $ok = $false }
+    }
+    return $ok
+}
+
 function Clear-Target($T) {
+    if ($T.Type -eq 'files') { return Clear-Files $T.Path }
     if ($T.Type -eq 'userassist') { return Clear-UserAssist $T.Path }
     return Clear-Branch $T.Path
 }
@@ -143,6 +163,18 @@ function New-Backup([object[]]$Active) {
     }
     $i = 0
     foreach ($t in $Active) {
+        if ($t.Type -eq 'files') {
+            $dest = Join-Path $backup ('JumpLists\' + (Split-Path -Leaf $t.Path))
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            $src = @(Get-ChildItem -LiteralPath $t.Path -File -Force -ErrorAction SilentlyContinue)
+            foreach ($f in $src) { Copy-Item -LiteralPath $f.FullName -Destination $dest -Force }
+            $copied = @(Get-ChildItem -LiteralPath $dest -File -Force -ErrorAction SilentlyContinue).Count
+            if ($copied -lt $src.Count) {
+                Write-Host "Не вдалося скопіювати файли з $($t.Path)." -ForegroundColor Red
+                return $null
+            }
+            continue
+        }
         $i++
         $file = Join-Path $backup ("branch_{0:D2}.reg" -f $i)
         & reg.exe export "HKCU\$($t.Path)" $file /y 2>&1 | Out-Null
@@ -157,13 +189,18 @@ function New-Backup([object[]]$Active) {
 
 Скрипт очистив історію Провідника: вікно "Виконати" (Win+R), введені
 шляхи, історію пошуку, нещодавні документи, історію вигляду папок
-(ShellBags) і лічильники запусків програм (UserAssist). Самі файли й
-налаштування програм не чіпалися.
+(ShellBags), лічильники запусків програм (UserAssist) і меню іконок на
+панелі задач (Jump Lists). Самі файли й налаштування програм не чіпалися.
 
 ВІДНОВЛЕННЯ
 1. Двічі клацніть кожен branch_XX.reg у цій папці -> підтвердіть -> "Так".
    Імпорт лише ДОДАЄ записи назад.
-2. Перезавантажте комп'ютер, щоб Провідник перечитав відновлені гілки.
+2. Jump Lists: скопіюйте файли з папок JumpLists\AutomaticDestinations
+   і JumpLists\CustomDestinations назад у
+   %APPDATA%\Microsoft\Windows\Recent\AutomaticDestinations та
+   %APPDATA%\Microsoft\Windows\Recent\CustomDestinations
+   (вставте шлях в адресний рядок Провідника).
+3. Перезавантажте комп'ютер, щоб Провідник перечитав відновлене.
 
 ПРО ЩО ЙДЕТЬСЯ
    branch_XX.reg - це гілки HKCU\...\Explorer\{RunMRU, TypedPaths,
@@ -196,6 +233,8 @@ function Main {
         [pscustomobject]@{ Label = 'Вигляд папок: Classes (MRU)';      Path = $BagMRU2;    Type = 'branch';     Items = 0 }
         [pscustomobject]@{ Label = 'Вигляд папок: Classes (дані)';     Path = $Bags2;      Type = 'branch';     Items = 0 }
         [pscustomobject]@{ Label = 'Лічильники запусків (UserAssist)'; Path = $UserAssist; Type = 'userassist'; Items = 0 }
+        [pscustomobject]@{ Label = 'Jump Lists: нещодавні (авто)';     Path = $JumpAuto;   Type = 'files';      Items = 0 }
+        [pscustomobject]@{ Label = 'Jump Lists: власні програм';       Path = $JumpCustom; Type = 'files';      Items = 0 }
     )
 
     foreach ($t in $targets) { $t.Items = Measure-Target $t }
@@ -215,6 +254,7 @@ function Main {
     Write-Host 'Провідник буде перезапущено: відкриті вікна Провідника закриються.' -ForegroundColor DarkGray
     Write-Host 'ShellBags: скинеться збережений вигляд папок (розмір вікна, сортування).' -ForegroundColor DarkGray
     Write-Host 'UserAssist: скинеться список "найчастіше використовувані" в меню Пуск.' -ForegroundColor DarkGray
+    Write-Host 'Jump Lists: зникне закріплене всередині меню іконок на панелі задач (самі іконки лишаться).' -ForegroundColor DarkGray
     Write-Host ''
 
     # --- Choose action ---
