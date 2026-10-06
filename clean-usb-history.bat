@@ -12,17 +12,25 @@
 ::  The cmd part is pure ASCII; the logic runs in PowerShell below.
 :: ============================================================
 
+set "SELF=%~f0"
+
 net session >nul 2>&1
 if errorlevel 1 (
-    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Start-Process -FilePath $env:SELF -Verb RunAs -ErrorAction Stop } catch { $UacDenied = 1; $s=[IO.File]::ReadAllText($env:SELF,[Text.Encoding]::UTF8); iex $s.Substring($s.IndexOf('#'+'PS-BEGIN')) }"
     exit /b
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=[IO.File]::ReadAllText('%~f0',[Text.Encoding]::UTF8); $i=$s.IndexOf('#'+'PS-BEGIN'); iex $s.Substring($i)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=[IO.File]::ReadAllText($env:SELF,[Text.Encoding]::UTF8); iex $s.Substring($s.IndexOf('#'+'PS-BEGIN'))"
 exit /b
 
 #PS-BEGIN
 $ErrorActionPreference = 'SilentlyContinue'
+
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    Write-Host 'PowerShell у обмеженому режимі (Constrained Language Mode) - потрібен повний. Нічого не змінено.' -ForegroundColor Red
+    Read-Host 'Натисніть Enter, щоб закрити' | Out-Null
+    exit
+}
 
 function Wait-Key {
     Write-Host ''
@@ -115,11 +123,29 @@ function New-Backup($Logs, $RegExports) {
     $stamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
     $backup = Join-Path $env:LOCALAPPDATA "USB-backup-$stamp"
     New-Item -ItemType Directory -Path $backup -Force | Out-Null
-    if (-not (Test-Path -LiteralPath $backup)) { return $null }
-    foreach ($file in $RegExports.Keys) {
-        & reg.exe export $RegExports[$file] (Join-Path $backup $file) /y 2>&1 | Out-Null
+    if (-not (Test-Path -LiteralPath $backup)) {
+        Write-Host 'Не вдалося створити папку для резервної копії.' -ForegroundColor Red
+        return $null
     }
-    foreach ($f in $Logs) { Copy-Item -LiteralPath $f.FullName -Destination $backup -Force }
+    foreach ($file in $RegExports.Keys) {
+        $key = $RegExports[$file]
+        & reg.exe query $key > $null 2>&1
+        if ($LASTEXITCODE -ne 0) { continue }   # branch absent (e.g. EMDMgmt/ReadyBoost) - nothing to back up
+        $dest = Join-Path $backup $file
+        & reg.exe export $key $dest /y 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $dest)) {
+            Write-Host "Не вдалося експортувати $key." -ForegroundColor Red
+            return $null
+        }
+    }
+    foreach ($f in $Logs) {
+        $dest = Join-Path $backup $f.Name
+        Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
+        if (-not (Test-Path -LiteralPath $dest)) {
+            Write-Host "Не вдалося скопіювати журнал $($f.Name)." -ForegroundColor Red
+            return $null
+        }
+    }
     $readme = @'
 ЯК ВІДНОВИТИ ЗМІНИ ПІСЛЯ clean-usb-history.bat
 ==============================================
@@ -445,5 +471,9 @@ function Main {
     }
 }
 
-Main
+if ($UacDenied) {
+    Write-Host 'Права адміністратора не надано. Нічого не змінено.' -ForegroundColor Yellow
+} else {
+    Main
+}
 Wait-Key

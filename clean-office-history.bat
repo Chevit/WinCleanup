@@ -10,14 +10,22 @@
 ::  The cmd part is pure ASCII; the logic runs in PowerShell below.
 :: ============================================================
 
+set "SELF=%~f0"
+
 :: MRU is per-user, so admin rights are NOT required. Run as the
 :: current user so HKCU points at the right profile.
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=[IO.File]::ReadAllText('%~f0',[Text.Encoding]::UTF8); $i=$s.IndexOf('#'+'PS-BEGIN'); iex $s.Substring($i)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=[IO.File]::ReadAllText($env:SELF,[Text.Encoding]::UTF8); iex $s.Substring($s.IndexOf('#'+'PS-BEGIN'))"
 exit /b
 
 #PS-BEGIN
 $ErrorActionPreference = 'SilentlyContinue'
+
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    Write-Host 'PowerShell у обмеженому режимі (Constrained Language Mode) - потрібен повний. Нічого не змінено.' -ForegroundColor Red
+    Read-Host 'Натисніть Enter, щоб закрити' | Out-Null
+    exit
+}
 
 function Wait-Key {
     Write-Host ''
