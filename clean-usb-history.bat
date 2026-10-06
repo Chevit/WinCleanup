@@ -378,6 +378,16 @@ function Main {
     Write-Host "  VolumeInfoCache (мітки дисків):    $($viKeys.Count)"
     Write-Host "  Розділи в setupapi-логах:          $logHits"
     Write-Host ''
+    if ($viKeys.Count -gt 0) {
+        Write-Host 'Кеш міток дисків (VolumeInfoCache), літери без підключеного диска:' -ForegroundColor Yellow
+        foreach ($n in $viKeys) {
+            $lk = Get-Key $HKLM "$viPath\$n"
+            $label = ''
+            if ($lk) { $label = "$($lk.GetValue('VolumeLabel'))"; $lk.Close() }
+            if ($label) { Write-Host "  - $n  «$label»" } else { Write-Host "  - $n" }
+        }
+        Write-Host ''
+    }
     if ($evtLogs.Count -gt 0) {
         Write-Host 'Журнали підключення (буде очищено ПОВНІСТЮ):' -ForegroundColor Yellow
         foreach ($ln in $evtLogs) { Write-Host "  - $ln" }
