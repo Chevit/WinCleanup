@@ -161,6 +161,7 @@ function New-Backup($Logs, $RegExports) {
      MountPoints2.reg            - історія томів у профілі користувача
      WindowsPortableDevices.reg  - назви флешок
      EMDMgmt.reg                 - кеш ReadyBoost (файлу може не бути)
+     VolumeInfoCache.reg         - мітки дисків (кеш Windows Search)
    Імпорт лише ДОДАЄ назад видалене і нічого нового не стирає.
 
 2. SETUPAPI-ЛОГИ
@@ -262,6 +263,7 @@ function Main {
     $mp2Path = 'Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2'
     $wpdPath = 'SOFTWARE\Microsoft\Windows Portable Devices\Devices'
     $emdPath = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\EMDMgmt'
+    $viPath  = 'SOFTWARE\Microsoft\Windows Search\VolumeInfoCache'
 
     $mdValues = @(); $volGuids = @()
     $md = Get-Key $HKLM $mdPath
@@ -288,6 +290,22 @@ function Main {
 
     $wpdKeys = @(Find-SubKeys $HKLM $wpdPath $presentKeys)
     $emdKeys = @(Find-SubKeys $HKLM $emdPath $presentKeys)
+
+    # VolumeInfoCache: Windows Search caches the label of every drive letter it has
+    # seen (subkeys like 'E:'). It is keyed by letter, not by device, so we remove only
+    # letters that are NOT assigned to any drive right now, and never the system drive.
+    $sysLetter = $env:SystemDrive.Substring(0, 1).ToUpper()
+    $liveLetters = @([IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpper() })
+    $viKeys = @()
+    $vi = Get-Key $HKLM $viPath
+    if ($vi) {
+        foreach ($n in $vi.GetSubKeyNames()) {
+            if ($n -notmatch '^([A-Za-z]):?$') { continue }
+            $letter = $Matches[1].ToUpper()
+            if ($letter -ne $sysLetter -and $liveLetters -notcontains $letter) { $viKeys += $n }
+        }
+        $vi.Close()
+    }
 
     # Windows Portable Devices name cache + MountPoints2 entries for the WPD devices.
     $wpdNameKeys = @(Find-SubKeysByTokens $HKLM $wpdPath $wpdKeysId)
@@ -326,7 +344,7 @@ function Main {
     # --- Preview ---
     $total = $disks.Count + $vols.Count + $parents.Count + $wpd.Count + $mdValues.Count +
              $mp2Keys.Count + $wpdMp2Keys.Count + $wpdKeys.Count + $wpdNameKeys.Count +
-             $emdKeys.Count + $logHits + $evtLogs.Count
+             $emdKeys.Count + $viKeys.Count + $logHits + $evtLogs.Count
     Write-Host ''
     if ($presentKeys.Count -gt 0) {
         Write-Host "Підключені зараз флешки ($($presentKeys.Count)) не чіпаються." -ForegroundColor DarkGray
@@ -357,6 +375,7 @@ function Main {
     Write-Host "  MountPoints2 (профіль):            $($mp2Keys.Count + $wpdMp2Keys.Count)"
     Write-Host "  Windows Portable Devices (назви):  $($wpdKeys.Count + $wpdNameKeys.Count)"
     Write-Host "  EMDMgmt (ReadyBoost):              $($emdKeys.Count)"
+    Write-Host "  VolumeInfoCache (мітки дисків):    $($viKeys.Count)"
     Write-Host "  Розділи в setupapi-логах:          $logHits"
     Write-Host ''
     if ($evtLogs.Count -gt 0) {
@@ -385,6 +404,7 @@ function Main {
             'MountPoints2.reg'           = "HKCU\$mp2Path"
             'WindowsPortableDevices.reg' = "HKLM\$wpdPath"
             'EMDMgmt.reg'                = "HKLM\$emdPath"
+            'VolumeInfoCache.reg'        = "HKLM\$viPath"
         }
         $backup = New-Backup $logs $regExports
         if (-not $backup) {
@@ -419,7 +439,8 @@ function Main {
     $targets = @(
         @{ H = $HKCU; P = $mp2Path; N = @($mp2Keys + $wpdMp2Keys | Sort-Object -Unique) },
         @{ H = $HKLM; P = $wpdPath; N = @($wpdKeys + $wpdNameKeys | Sort-Object -Unique) },
-        @{ H = $HKLM; P = $emdPath; N = $emdKeys }
+        @{ H = $HKLM; P = $emdPath; N = $emdKeys },
+        @{ H = $HKLM; P = $viPath;  N = $viKeys }
     )
     foreach ($t in $targets) {
         if ($t.N.Count -eq 0) { continue }

@@ -11,8 +11,9 @@ The repo is edited on macOS; scripts run on Windows 10 2004+ / Windows 11. They 
 | File | Scope | Admin | Destructive? | Backup |
 |---|---|---|---|---|
 | `clean-windows.bat` | `%TEMP%`, `%WINDIR%\Temp` (items older than 1 h), Explorer Recent + Quick Access recent jump list, `cleanmgr /sagerun:42` (safe categories only), `DISM /StartComponentCleanup` | yes | low, no prompt | no |
-| `clean-usb-history.bat` | Disconnected USB flash drives (USBSTOR) + disconnected portable devices (WPD): PnP records, `MountedDevices`, `MountPoints2`, `Windows Portable Devices`, `EMDMgmt`, `setupapi.dev*.log` sections, 4 device-connection event logs | yes | high | option `1` = backup, `5` = no backup |
+| `clean-usb-history.bat` | Disconnected USB flash drives (USBSTOR) + disconnected portable devices (WPD): PnP records, `MountedDevices`, `MountPoints2`, `Windows Portable Devices`, `EMDMgmt`, `VolumeInfoCache`, `setupapi.dev*.log` sections, 4 device-connection event logs | yes | high | option `1` = backup, `5` = no backup |
 | `clean-office-history.bat` | Word/Excel/PowerPoint MRU for every Office version and account: File/Place MRU, Recent Templates, TrustRecords, Word Reading Locations, `%APPDATA%\Microsoft\Office\Recent` | **no** (HKCU, must run as current user) | medium | option `1` = backup, `5` = no backup |
+| `clean-shell-history.bat` | Explorer activity: RunMRU (Win+R), TypedPaths, WordWheelQuery (search), RecentDocs, ShellBags (folder views, both `Software\Shell` and `Classes`), UserAssist launch counters | **no** (HKCU, must run as current user) | medium (resets folder views) | option `1` = backup, `5` = no backup |
 
 ## File format — hard rules
 
@@ -63,6 +64,11 @@ exit /b
 6. `cleanmgr` profile 42: every `VolumeCaches` key gets `StateFlags0042` explicitly set — `2` for the safe list, `0` for the rest.
 7. Processes that rewrite state on exit (Explorer, Office) are closed before cleaning; Office force-close only after an explicit `9`.
 
+## Decisions
+
+- **setupapi logs are edited section-by-section, never deleted whole.** `setupapi.dev*.log` is a plain diagnostic log Windows regenerates, so deleting it would "work" — but it is shared by every device install (printers, GPUs, NICs). Surgical removal keeps the log plausible and preserves unrelated install history; an empty or missing log is itself a signal. Deletion is also unreliable (the PnP service holds the file).
+- **VolumeInfoCache is keyed by drive letter, not device**, so `clean-usb-history.bat` removes only letters with no drive mounted *now* and never the system drive. A temporarily-unplugged external disk's label can be caught too — acceptable (it's a disconnected drive) and it's in the backup.
+
 ## Adding a new script
 
 Copy `clean-windows.bat`'s launcher, keep the safety model above, add a row to the table, update the header comment block (scope, requirements, options).
@@ -77,11 +83,38 @@ Fixed 2026-10-06:
 - Constrained Language Mode guard added to all three.
 - Added `check.sh` (format guard, Mac-side only).
 - `clean-usb-history.bat`: setupapi filter now also removes sections of disconnected WPD devices (phones/cameras), not just flash drives (`$wpdKeysId` folded into `Invoke-LogFilter` `$Extra`; preview count updated).
+- `clean-usb-history.bat`: added `VolumeInfoCache` (cached drive labels for disconnected letters).
+- Added `clean-shell-history.bat` (Explorer activity: RunMRU, TypedPaths, WordWheelQuery, RecentDocs, ShellBags, UserAssist).
 
 Open:
 - `clean-office-history.bat`: `Recent Templates` root is treated as a value MRU — any non-whitelisted setting value there would be deleted. Verify on a real profile or drop that target.
-- Not covered yet (candidates): `HKLM\SOFTWARE\Microsoft\Windows Search\VolumeInfoCache` (drive letters + volume labels), ShellBags, Office app jump lists in `AutomaticDestinations`, Office roaming MRU for signed-in accounts (list can come back from the cloud).
+- Not covered yet (candidates): Office app jump lists in `AutomaticDestinations`, Office roaming MRU for signed-in accounts (list can come back from the cloud), Windows Search index (`Windows.edb`), thumbnail/icon caches beyond cleanmgr.
 
 ## Testing
 
 No PowerShell on the dev Mac — scripts are reviewed by reading and tested manually on a real Windows machine (snapshot/restore-point first). Threat model: ordinary inspection via Explorer/Word plus common free tools (USBDeview, ShellBags Explorer); full forensic recovery (VSS snapshots, $UsnJrnl, free-space carving) is out of scope and can't be addressed with built-in tools alone.
+
+## Cleanup surface / roadmap
+
+Full map of what Windows holds and what is/could be cleaned with built-in tools. ✅ done, ⬜ candidate, 🚫 not feasible with built-in tools.
+
+| Domain | Target | Status | Script |
+|---|---|---|---|
+| Temp/disk | `%TEMP%`, `%WINDIR%\Temp`, cleanmgr, DISM | ✅ | windows |
+| Explorer recent | Recent, Quick Access | ✅ | windows |
+| USB flash | USBSTOR, MountedDevices, MountPoints2, setupapi, event logs | ✅ | usb |
+| Portable (WPD) | phones/cameras: PnP, WPD reg, setupapi | ✅ | usb |
+| Drive labels | VolumeInfoCache | ✅ | usb |
+| Office MRU | File/Place MRU, TrustRecords, Reading Locations | ✅ | office |
+| Shell activity | RunMRU, TypedPaths, WordWheelQuery, RecentDocs, ShellBags, UserAssist | ✅ | shell |
+| Shell | Jump Lists (`AutomaticDestinations`/`CustomDestinations`) | ⬜ | — |
+| Search | Windows Search index (`Windows.edb`) | ⬜ | — |
+| Caches | thumbnail/icon caches beyond cleanmgr | ⬜ | — |
+| Event logs | Shell-Core/Operational, TaskScheduler, RDP connections | ⬜ | — |
+| Browsers | history/cache/cookies | 🚫 (per-browser, out of scope) | — |
+| Credentials | Credential Manager | 🚫 (would break sign-in) | — |
+| Free space | carving recovery (`cipher /w:`) | 🚫 (separate, slow) | — |
+| VSS | shadow copies (`vssadmin`) | 🚫 (separate concern) | — |
+| NTFS journal | `$UsnJrnl`, `$LogFile` | 🚫 (not editable in place) | — |
+
+Clearing any whole event log leaves a 1102/104 "log cleared" event — a visible trace in itself.
