@@ -76,9 +76,9 @@ Fixed 2026-10-06:
 - `clean-windows.bat`: Enter/0 confirmation before acting; `Dism.exe` exit code checked.
 - Constrained Language Mode guard added to all three.
 - Added `check.sh` (format guard, Mac-side only).
+- `clean-usb-history.bat`: setupapi filter now also removes sections of disconnected WPD devices (phones/cameras), not just flash drives (`$wpdKeysId` folded into `Invoke-LogFilter` `$Extra`; preview count updated).
 
 Open:
-- `clean-usb-history.bat`: setupapi filter only matches flash drives + their USB parents; sections of removed WPD devices (phones/cameras) stay in the log. Pass `$wpdKeysId` into `Invoke-LogFilter` `$Extra` and the preview count.
 - `clean-office-history.bat`: `Recent Templates` root is treated as a value MRU — any non-whitelisted setting value there would be deleted. Verify on a real profile or drop that target.
 - Not covered yet (candidates): `HKLM\SOFTWARE\Microsoft\Windows Search\VolumeInfoCache` (drive letters + volume labels), ShellBags, Office app jump lists in `AutomaticDestinations`, Office roaming MRU for signed-in accounts (list can come back from the cloud).
 

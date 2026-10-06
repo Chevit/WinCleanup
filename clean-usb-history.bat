@@ -49,7 +49,8 @@ function Test-Present([string]$Text, [string[]]$Keys) {
     return $false
 }
 
-# True if text belongs to a flash drive (USBSTOR or its USB port record) that is NOT connected
+# True if text belongs to a flash drive (USBSTOR or its USB port record), OR to any
+# token in $Extra (USB-port parents and disconnected WPD devices), and is NOT connected.
 function Test-FlashText([string]$Text, [string[]]$Keys, [string[]]$Extra) {
     $u = ($Text -replace '\\', '#').ToUpper()
     $hit = $u.Contains('USBSTOR#')
@@ -298,9 +299,13 @@ function Main {
     }
 
     # --- setupapi logs ---
+    # Extra tokens that count as 'ours' inside a log section: USB-port records of the
+    # flash drives ($parentKeys) plus the disconnected WPD devices / their parents
+    # ($wpdKeysId). $wpdKeysId holds only NOT-present devices, so connected ones stay.
+    $logExtra = @($parentKeys + $wpdKeysId | Sort-Object -Unique)
     $logs = @(Get-ChildItem -Path (Join-Path $env:WINDIR 'INF') -Filter 'setupapi.dev*.log' -File)
     $logHits = 0
-    foreach ($f in $logs) { $logHits += Invoke-LogFilter $f.FullName $presentKeys $parentKeys $false }
+    foreach ($f in $logs) { $logHits += Invoke-LogFilter $f.FullName $presentKeys $logExtra $false }
 
     # --- Event logs that record device/USB connection history ---
     # These can only be cleared as a whole (single entries can't be removed).
@@ -428,7 +433,7 @@ function Main {
     Write-Host '[3/4] Очищення журналу встановлення пристроїв (setupapi)...' -ForegroundColor Cyan
     $okLog = 0; $failLog = 0
     foreach ($f in $logs) {
-        try { $okLog += Invoke-LogFilter $f.FullName $presentKeys $parentKeys $true } catch { $failLog++ }
+        try { $okLog += Invoke-LogFilter $f.FullName $presentKeys $logExtra $true } catch { $failLog++ }
     }
 
     # --- 4. Event logs (export when backing up, then clear whole log) ---
